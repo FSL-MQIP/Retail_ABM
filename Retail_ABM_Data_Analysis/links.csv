@@ -1,0 +1,33 @@
+﻿Out,In,Out,In,Out,In
+3,4,cutting-board,cutting-knife,1,1
+15,16,door ,employee,2,1
+15,18,door ,employee,2,1
+15,10,door,employee,2,1
+15,11,door ,employee,2,1
+31,32,cleaning-equipment,work-table,2,1
+31,7,cleaning-equipment,sink,2,2
+32,3,work-table,cutting-board,1,1
+14,10,runner,employee,2,1
+14,11,runner,employee,2,1
+16,14,employee,runner,1,2
+14,18,runner,employee,2,1
+10,5,employee,fruit-baskets,1,1
+5,6,fruit-baskets,employee-scale,1,1
+10,2,employee,wrapper,1,1
+10,6,employee,employee-scale,1,1
+32,10,work-table,employee,1,1
+35,36,wet-shelf-1,wet-shelf-2,1,1
+36,37,wet-shelf-2,wet-shelf-3,1,1
+37,38,wet-shelf-3,wet-shelf-4,1,1
+39,40,wet-shelf-5,wet-shelf-6,1,1
+40,41,wet-shelf-6,wet-shelf-7,1,1
+41,42,wet-shelf-7,wet-shelf-8,1,1
+43,44,wet-shelf-9,wet-shelf-10,1,1
+44,45,wet-shelf-10,wet-shelf-11,1,1
+45,46,wet-shelf-11,wet-shelf-12,1,1
+48,49,wet-shelf-14,wet-shelf-15,1,1
+49,50,wet-shelf-15,wet-shelf-16,1,1
+50,51,wet-shelf-16,wet-shelf-17,1,1
+52,53,wet-shelf-18,wet-shelf-19,1,1
+53,54,wet-shelf-19,wet-shelf-20,1,1
+54,55,wet-shelf-20,wet-shelf-21,1,1

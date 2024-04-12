@@ -1,0 +1,446 @@
+---
+title: "Retail_ABM_Data_Analysis"
+author: "YeonJin Jung"
+output: html_document
+date: '2024-01-30'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Loading Packages
+```{r, message=FALSE}
+library(data.table)
+library(tidyverse)
+library(epiR)
+library(ggplot2)
+library(skimr)
+library(dplyr)
+library(FSA)
+```
+
+## Loading Data 
+```{r}
+# Baseline data collected for validation, sensitivity analysis, and cluster analysis
+raw_data = fread('Retail_ABM_Baseline_Result-table.csv', skip = 6, sep = ",", header = TRUE)
+
+# Importing agent smartlist
+agent_list = read_csv('Agents smartlist.csv', show_col_types = FALSE)
+
+# Importing all the directed links
+dlinks = read_csv('dlinks.csv', show_col_types = FALSE)
+
+# Importing all the undirected links
+links = read_csv('links.csv', show_col_types = FALSE)
+```
+
+## Loading Utility Functions 
+```{r}
+# Creating a function that transforms the data format and calculate the mean
+getMeanFromStr = function(string){
+  result = string %>% 
+    gsub("\\[|\\]", "", .) %>% 
+    strsplit(" ") %>% 
+    unlist() %>% 
+    as.numeric() %>% 
+    mean()
+  return(result)
+}
+
+# Creating a function that transforms the data format and puts the data into a new table into 4 rows
+getNumList = function(string){
+  result = string %>% 
+    gsub("\\[|\\]", "", .) %>% 
+    strsplit(" ") %>% 
+    unlist() %>% 
+    as.numeric() %>% 
+    matrix(., nrow = 4, byrow = TRUE) %>% 
+    as_tibble()
+  return(result)
+}
+```
+
+## Data Pre-Processing 
+```{r}
+# Removing the unnecessary columns (i.e., run number, random-seed, and step)
+dat = raw_data %>% 
+  select(-c(1,2,4))
+
+# Keeping the necessary columns from agent smartlist and adding a column that shows detection limit
+agent = agent_list %>% 
+  select(number, name, area) %>% 
+  mutate(number = number,
+         detec_limit = if_else(area <= 100, 0.1, 0.016))
+
+# Selecting the data that are used for cluster analysis and renaming them 
+ca = dat %>% 
+  select("all-time-contaminated-list", "all-max-consec-contam-list", "all-time-detect-list","all-max-consec-detect-list", "all-contacts-list","all-transfers-list",
+         "all-prev-list","all-conc-list", "all-count-list", "all-maintenance-events-list","all-roof-leak-events-list") %>% 
+  rename("total_detected_time" = "all-time-detect-list", 
+         "max_consecutive_detected_time" = "all-max-consec-detect-list",
+         "total_contaminated_time" = "all-time-contaminated-list",
+         "max_consecutive_contaminated_time" = "all-max-consec-contam-list",
+         "total_contaminated_contact" = "all-contacts-list",
+         "total_transfer" = "all-transfers-list",
+         "prev" = "all-prev-list",
+         "conc" = "all-conc-list",
+         "count" = "all-count-list", 
+         "total_maintenance" = "all-maintenance-events-list",
+         "total_roof_leak" = "all-roof-leak-events-list")
+```
+
+## Validation 
+```{r}
+# Data processing for calculating mean Listeria prevalence for each agent
+agent_prev_df = dat %>% 
+  select("all-prev-list") 
+
+result = tibble()
+for (i in 1:1000) {
+  result = bind_rows(result, getNumList(agent_prev_df[i]))
+}
+
+# Mean Listeria prevalence for agents from the simulation
+agent_mean_prev = tibble(agent_num = agent$number,
+                            name = agent$name, 
+                             Mean_Prevalence = colMeans(result))
+
+agent_mean_prev_df = agent_mean_prev %>% 
+  mutate(Lmono_prev = Mean_Prevalence * 67 / 200) %>%
+  filter(name %in% c("cutting-board", "cutting-knife", "consumer-scale", "sink","handwash-station", "runner", "wet-shelf", "water-sprinkler-head","dry-display-shelf"))
+
+# Creating data frame from the validation data
+validation_df = data.frame(name = c("cutting-board", "cutting-knife", "consumer-scale", "sink","handwash-station", "runner", "wet-shelf", "water-sprinkler-head","dry-display-shelf"),
+           positive = c(4, 3, 3, 2, 5, 5, 3, 1, 8),
+           total = c(178, 179, 179, 180, 180, 179, 349, 335, 712)
+           )
+
+# Calculating 95% confidence interval for validation
+validation_df = validation_df %>% 
+  mutate(prevalence = positive/total) %>%
+  rowwise() %>% 
+  mutate(conf_low = binom.test(positive, total)$conf.int[1],
+         conf_high = binom.test(positive, total)$conf.int[2])
+
+# Checking if the agent is validated
+validation_prev_df = full_join(validation_df, agent_mean_prev_df, by = "name") %>% 
+  select(-c(positive,total, Mean_Prevalence) ) %>% 
+  mutate(within_conf = if_else(Lmono_prev <= conf_high & Lmono_prev >= conf_low, 1, 0))
+
+validation_df_summary = validation_prev_df %>% 
+  group_by( within_conf) %>% 
+  summarise(n = n()) %>% 
+  mutate(freq = n / sum(n))
+``` 
+
+## Descriptive statistics
+```{r}
+# Comparing mean prevalence by zone
+zone_prev_dat = dat %>% 
+  select(`z1-all-prev-list`, `z2-all-prev-list`) %>% 
+  rowwise() %>% 
+  mutate(z1_mean_prev = getMeanFromStr(`z1-all-prev-list`),
+         z2_mean_prev = getMeanFromStr(`z2-all-prev-list`)) #%>% 
+  #filter(z1_mean_prev > 0,
+         #z2_mean_prev > 0)
+
+# Calculating mean Listeria prevalence by hygienic zones
+zone_prev_mean = zone_prev_dat %>% 
+  select(z1_mean_prev, z2_mean_prev) %>% 
+  colMeans()
+
+# Comparing mean concentration by zone
+zone_conc_dat = dat %>% 
+  select(`z1-all-conc-list`, `z2-all-conc-list`) %>% 
+  rowwise() %>% 
+  mutate(z1_mean_conc = getMeanFromStr(`z1-all-conc-list`),
+         z2_mean_conc= getMeanFromStr(`z2-all-conc-list`))
+
+# Calculating mean Listeria prevalence by hygienic zones
+zone_conc_mean = zone_conc_dat %>% 
+  select(`z1_mean_conc`, `z2_mean_conc`) %>% 
+  colMeans()
+
+# Calculating mean prevalence by location
+loc_prev_dat = dat %>% 
+  select(`cutting-all-prev-list`,`wet-all-prev-list`,`dry-all-prev-list`,`storage-all-prev-list`) %>% 
+  rowwise() %>% 
+  mutate(cutting_mean_prev = getMeanFromStr(`cutting-all-prev-list`),
+         wet_mean_prev = getMeanFromStr(`wet-all-prev-list`),
+         dry_mean_prev = getMeanFromStr(`dry-all-prev-list`),
+         storage_mean_prev = getMeanFromStr(`storage-all-prev-list`)) #%>% 
+  #filter(cutting_mean_prev > 0 | 
+         #wet_mean_prev > 0 |
+         #dry_mean_prev >0 |
+         #storage_mean_prev > 0)
+
+loc_mean = loc_prev_dat %>% 
+  select(cutting_mean_prev, wet_mean_prev, dry_mean_prev, storage_mean_prev) %>% 
+  colMeans()
+
+# Calculating mean concentration by location
+loc_conc_dat = dat %>% 
+  select(`cutting-all-conc-list`,`wet-all-conc-list`,`dry-all-conc-list`,`storage-all-conc-list`) %>% 
+  rowwise() %>% 
+  mutate(cutting_mean_conc = getMeanFromStr(`cutting-all-conc-list`),
+         wet_mean_conc = getMeanFromStr(`wet-all-conc-list`),
+         dry_mean_conc = getMeanFromStr(`dry-all-conc-list`),
+         storage_mean_conc = getMeanFromStr(`storage-all-conc-list`)) #%>% 
+  #filter(cutting_mean_conc > 0 | 
+         #wet_mean_conc > 0 |
+         #dry_mean_conc >0 |
+         #storage_mean_conc > 0)
+
+loc_conc_mean = loc_conc_dat %>% 
+  select(cutting_mean_conc, wet_mean_conc, dry_mean_conc, storage_mean_conc) %>% 
+  colMeans()
+```
+
+## Sensitivity Analysis
+```{r}
+# generate a list of parameter names 
+paras = c("food-conc", "food-tc", "consumer-tc","consumer-prev", "maintenance-event", "roof-leak-event", "mu-max-rt", "mu-max-at", "all-box-prevalence","p11", "p12", "p21", "p22", "tc11", "tc12", "tc13", "tc14", "tc15" ,"tc21", "tc22","tc24", "tc25",  "tc34","tc41", "tc42", "tc43", "tc51", "tc52")
+
+# Creating a table that has all the parameters and calculating aggregated mean prevalence value for sensitivity analysis 
+dat_sa = dat %>% 
+  select(paras,`all-prev-list`) %>% 
+  rowwise() %>% 
+  mutate(mean_prev = getMeanFromStr(`all-prev-list`))
+
+# Sensitivity analysis (PRCC) for mean prevalence for all agents
+all_prev_sa = dat_sa %>% 
+  select(all_of(paras), mean_prev) %>% 
+  epi.prcc()
+
+all_prev_sa$parameters = paras
+
+all_prev_sa %>% 
+  ggplot(aes(x = reorder(parameters, est), y = est)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  theme_classic()  +
+  geom_text(aes(label = ifelse(p.value <= 0.001724138, "*", "")),  position = position_nudge(x = 0, y = 0.008), vjust = 0.8,  color = "red", size = 5) +
+  labs(y = "PRCC", x = "Parameters", 
+       title = "Sensitivity Analysis (PRCC) for mean prevalence for all agents") +
+  theme(plot.title = element_text(size = 9)) 
+ggsave("ABM_mean_prev_sa.tiff")
+
+#sensitivity analysis (PRCC) for mean concentration for all agents
+dat_conc_sa = dat %>% 
+  select(all_of(paras), `all-conc-list`) %>% 
+  rowwise() %>% 
+  mutate(mean_conc = getMeanFromStr(`all-conc-list`))
+
+all_conc_sa = dat_conc_sa %>% 
+  select(all_of(paras), mean_conc) %>% 
+  epi.prcc()
+
+all_conc_sa$parameters = paras
+
+all_conc_sa %>% 
+  ggplot(aes(x = reorder(parameters, est), y = est)) +
+  geom_bar(stat = "identity")+
+  coord_flip()+
+  theme_classic() +
+  geom_text(aes(label = ifelse(p.value <= 0.001724138, "*", "")),  position = position_nudge(x = 0.05, y = 0.01), vjust = 0.8,  color = "red", size = 5) +
+  labs(y = "PRCC", x = "Parameters", 
+       title = "Sensitivity Analysis (PRCC) for mean concentration for all agents") +
+  theme(plot.title = element_text(size = 9))
+ggsave("ABM_mean_conc_sa.tiff")
+
+```
+
+## Data Processing for Cluster Analysis
+```{r}
+# Converting the data to prepare the dataframe that takes the mean of each variable for each agent for cluster analysis
+result = tibble(agent_names = agent_list$name)
+for(i in 1:ncol(ca)){
+  column = ca %>% 
+    pull(colnames(ca)[i]) %>% 
+    gsub("\\[|\\]|\\\"|\\\n", "", .) %>% 
+    strsplit(" ") %>% 
+    unlist() %>% 
+    as.numeric() %>% 
+    matrix(., nrow = 1000, ncol = 68, byrow = TRUE) %>% 
+    t() %>% 
+    as_tibble() %>% 
+    rowwise() %>% 
+    mutate(col = mean(c_across(where(is.numeric)),na.rm = TRUE)) %>% 
+    pull(col) 
+  result = bind_cols(result, column)
+}
+
+colnames(result) = c("agent_name",colnames(ca))
+mean_ca = result %>% 
+  select(-1)
+mean_ca 
+```
+
+## Cluster Analysis
+```{r}
+library(factoextra)
+#loading agents names for cluster analysis
+agent_name_ca = agent_list$name
+agent_name_ca[13] = "dry_display_13"
+agent_name_ca[20] = "dry_display_20"
+agent_name_ca[21] = "dry_display_21"
+agent_name_ca[22] = "dry_display_22"
+agent_name_ca[23] = "dry_display_23"
+agent_name_ca[24] = "dry_display_24"
+agent_name_ca[25] = "dry_display_25"
+agent_name_ca[26] = "dry_display_26"
+agent_name_ca[27] = "dry_display_27"
+agent_name_ca[28] = "dry_display_28"
+agent_name_ca[29] = "dry_display_29"
+agent_name_ca[30] = "dry_display_30"
+agent_name_ca[31] = "dry_display_31"
+
+#Hierarchical Clustering
+#Dissimilarity matrix
+distance = dist(scale(mean_ca), method = "euclidean")
+#View(as.matrix(round(distance,2)))
+
+#Visualizing matrix 
+fviz_dist(distance)
+
+#Dendogram Result
+hc1 = hclust(distance, method = "ward.D")
+hc1$labels = agent_name_ca
+plot(hc1, cex = 0.6, main = "Ward's Linkage", sub = "", xlab = "Agents", hang = -1)
+
+#Cluster Analysis visualization with six clusters
+plot(hc1, cex = 0.6, main = "Ward's Linkage with Six Clusters", sub = "", xlab = "Agents", hang = -1) 
+rect.hclust(hc1, k = 6, border = 2:7)
+legend("topright", legend = c("Cluster 1", "Cluster 2", "Cluster 3", "Cluster 4","Cluster 5", "Cluster 6"), cex = 0.8, fill = 2:7, border = 2:7)
+
+sub_grp_6 = cutree(hc1, k = 6)
+hc1$labels = agent_name_ca
+fviz_cluster(list(data = mean_ca , cluster = sub_grp_6), main = "Ward Linkage with Six Clusters") + scale_color_manual(values = c("green","blue","red","yellow","purple","orange")) + scale_fill_manual(values = c("green","blue","red","yellow","purple","orange"))
+
+```
+
+## Creating Summary Statistics for Cluster Analysis
+```{r}
+ca_df_grp6 = bind_cols(agent_number = agent_list$number+1, agent_name = agent_name_ca, mean_ca, cluster = sub_grp_6)
+
+ca_df_grp6_summary = ca_df_grp6 %>% 
+  arrange(cluster) %>% 
+  group_by(cluster) %>% 
+  summarise(mean_of_median_total_detected_time = round(mean(total_detected_time),3),
+            mean_of_median_max_consecutive_detected_time = round(mean(max_consecutive_detected_time),3),
+            mean_of_median_total_contaminated_time = round(mean(total_contaminated_time),3), 
+            mean_of_median_max_consecutive_contaminated_time = round(mean(max_consecutive_contaminated_time),3),
+            mean_of_median_total_contaminated_contact = round(mean(total_contaminated_contact),3),
+            mean_of_median_total_transfer = round(mean(total_transfer),3), 
+            mean_of_mean_prevalence = round(mean(prev),3),
+            mean_of_mean_concentration = round(mean(conc),3), 
+            mean_of_total_maintenacne_events = round(mean(total_maintenance),3),
+            mean_of_roof_leak_events = round(mean(total_roof_leak),3))
+write.csv(ca_df_grp6_summary, "cluster_analysis_summary.csv")
+```
+
+#Scneario Analysis
+## Loading files for Scenario Analysis 
+```{r}
+scenarios = list.files(path = ".x", pattern = "*.csv") %>%
+  map_df(~fread(.x, skip = 6, sep = ",", header = TRUE))
+```
+
+## Data pre-processing for calculating mean prevalence
+```{r}
+scenario_prev = scenarios %>% 
+  select("all-prev-list") 
+
+result = tibble()
+for (i in 1:14000) {
+  result = bind_rows(result, getNumList(scenario_prev[i]))
+}
+
+prev_result = result %>% 
+  mutate(weekly_mean_prev = rowMeans(result))
+```
+
+# Calculating the mean of mean weekly prevalence 
+```{r}
+prev_dat = prev_result %>% 
+  select(weekly_mean_prev)
+
+prev_df = data.frame(matrix(NA, 4000, 14))
+for (row in 1:14) {
+  start_row = (row - 1) * 4000 + 1
+  end_row = row * 4000
+  prev_df[, row] = prev_dat$weekly_mean_prev[start_row:end_row]
+}
+
+mean_prev = prev_df %>% 
+  rename(scenario_0 = X1,
+         scenario_1 = X2,
+         scenario_2 = X3,
+         scenario_3 = X4,
+         scenario_4 = X5,
+         scenario_5 = X6,
+         scenario_6 = X7,
+         scenario_7 = X8,
+         scenario_8 = X9,
+         scenario_9 = X10,
+         scenario_10 = X11,
+         scenario_11 = X12,
+         scenario_12 = X13,
+         scenario_13 = X14)
+
+mean_prev_summary = mean_prev %>% 
+  colMeans() %>% 
+  as_tibble() %>% 
+  mutate(scenario = c(0,1,2,3,4,5,6,7,8,9,10,11,12,13)) %>%
+  relocate(scenario, .before = value)
+```
+
+## Data pre-processing for calculating mean concentration
+```{r}
+scenario_conc = scenarios %>% 
+  select("all-conc-list") 
+
+conc_result = tibble()
+for (i in 1:14000) {
+  conc_result = bind_rows(conc_result, getNumList(scenario_conc[i]))
+}
+
+conc_result = result %>% 
+  mutate(weekly_mean_conc = rowMeans(conc_result))
+```
+
+# Calculating the mean of mean weekly concentration
+```{r}
+conc_dat = conc_result %>% 
+  select(weekly_mean_conc)
+
+conc_df = data.frame(matrix(NA, 4000, 14))
+for (row in 1:14) {
+  start_row = (row - 1) * 4000 + 1
+  end_row = row * 4000
+  conc_df[, row] = conc_dat$weekly_mean_conc[start_row:end_row]
+}
+
+mean_conc = conc_df %>% 
+  rename(scenario_0 = X1,
+         scenario_1 = X2,
+         scenario_2 = X3,
+         scenario_3 = X4,
+         scenario_4 = X5,
+         scenario_5 = X6,
+         scenario_6 = X7,
+         scenario_7 = X8,
+         scenario_8 = X9,
+         scenario_9 = X10,
+         scenario_10 = X11,
+         scenario_11 = X12,
+         scenario_12 = X13,
+         scenario_13 = X14)
+
+mean_conc_summary = mean_conc %>% 
+  colMeans() %>% 
+  as_tibble() %>% 
+  mutate(scenario = c(0,1,2,3,4,5,6,7,8,9,10,11,12,13)) %>%
+  relocate(scenario, .before = value)
+```

@@ -1,0 +1,7 @@
+"","cluster","mean_of_median_total_detected_time","mean_of_median_max_consecutive_detected_time","mean_of_median_total_contaminated_time","mean_of_median_max_consecutive_contaminated_time","mean_of_median_total_contaminated_contact","mean_of_median_total_transfer","mean_of_mean_prevalence","mean_of_mean_concentration","mean_of_total_maintenacne_events","mean_of_roof_leak_events"
+"1",1,1.49,0.486,7.403,1.365,9.416,4.079,0.002,0.009,0.009,0
+"2",2,45.824,4.319,82.119,7.486,77.683,202.599,0.069,0.048,0.007,0
+"3",3,13.664,12.754,142.612,123.774,24.614,28.367,0.017,0.001,0.007,0.001
+"4",4,66.66,57.14,144.488,123.788,112.363,13.011,0.102,0.036,0.01,0
+"5",5,14.074,7.221,150.156,80.893,88.088,113.558,0.019,0.001,0.01,0
+"6",6,14.408,13.431,141.079,121.141,24.579,37.238,0.018,0.002,0.01,0
